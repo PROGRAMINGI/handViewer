@@ -21,9 +21,14 @@ public class HandParser {
         private String position;
         private List<Card> cards = new ArrayList<>();
 
-        public Player(String name, int seatNumber) {
+        private double stack;
+        private String stackDisplay;
+
+        public Player(String name, int seatNumber, double stack) {
             this.name = name;
             this.seatNumber = seatNumber;
+            this.stack = stack;
+            this.stackDisplay = String.format("$%.2f", stack);
         }
     }
 
@@ -32,21 +37,17 @@ public class HandParser {
     public static class HandResult {
         private List<Player> players = new ArrayList<>();
         private List<Card> boardCards = new ArrayList<>();
-
         private List<String> preflopActions = new ArrayList<>();
         private List<String> flopActions = new ArrayList<>();
         private List<String> turnActions = new ArrayList<>();
         private List<String> riverActions = new ArrayList<>();
-
         private String potPreflop = "$0.00";
         private String potFlop = "$0.00";
         private String potTurn = "$0.00";
         private String potRiver = "$0.00";
-
-        private String heroName;
-
         private List<Card> opponentCards = new ArrayList<>();
         private List<Card> heroCards = new ArrayList<>();
+        private String heroName;
     }
 
     public HandResult parse(String historyText, boolean isAnonymous, boolean isBBMode) {
@@ -57,7 +58,6 @@ public class HandParser {
         int buttonSeat = 0;
         double totalPot = 0.0;
         double bbSize = 0.0;
-
         Map<String, Double> streetCommitments = new HashMap<>();
 
         for (String line : lines) {
@@ -66,18 +66,21 @@ public class HandParser {
             if (bbSize == 0.0 && line.contains("($") && line.contains("/")) {
                 bbSize = extractBigBlindSize(line);
             }
-
             if (line.contains("is the button")) {
                 try {
                     String num = line.substring(line.indexOf("#") + 1, line.indexOf(" is"));
                     buttonSeat = Integer.parseInt(num);
                 } catch(Exception e) {}
             }
+
             if (line.startsWith("Seat ") && line.contains("in chips")) {
                 try {
                     int seatNum = Integer.parseInt(line.substring(5, line.indexOf(":")));
                     String namePart = line.substring(line.indexOf(":") + 1, line.indexOf("(")).trim();
-                    Player player = new Player(namePart, seatNum);
+
+                    double stackSize = extractMoney(line.substring(line.indexOf("(")));
+
+                    Player player = new Player(namePart, seatNum, stackSize);
                     if (seatNum == buttonSeat) player.setButton(true);
                     result.getPlayers().add(player);
                 } catch (Exception e) {}
@@ -85,7 +88,6 @@ public class HandParser {
         }
 
         if (bbSize == 0.0) bbSize = 1.0;
-
         calculatePositions(result);
 
         for (String line : lines) {
@@ -114,7 +116,6 @@ public class HandParser {
             if (line.startsWith("Dealt to")) {
                 String extractedName = line.substring(9, line.lastIndexOf("[")).trim();
                 result.setHeroName(extractedName);
-
                 List<Card> heroCards = extractCards(line);
                 result.setHeroCards(heroCards);
                 for (Player p : result.getPlayers()) {
@@ -175,30 +176,14 @@ public class HandParser {
         if (isBBMode) {
             applyBBConversion(result, bbSize);
         }
-
         if (isAnonymous) {
             applyAnonymization(result);
-
             for (Player p : result.getPlayers()) {
-                if (p.isHero()) {
-                    result.setHeroName(p.getName());
-                    break;
-                }
+                if (p.isHero()) { result.setHeroName(p.getName()); break; }
             }
         }
 
         return result;
-    }
-
-    private double extractBigBlindSize(String line) {
-        try {
-            Pattern p = Pattern.compile("\\/\\$(\\d+(\\.\\d+)?)");
-            Matcher m = p.matcher(line);
-            if (m.find()) {
-                return Double.parseDouble(m.group(1));
-            }
-        } catch (Exception e) {}
-        return 0.0;
     }
 
     private void applyBBConversion(HandResult result, double bbSize) {
@@ -211,6 +196,11 @@ public class HandParser {
         convertLogsToBB(result.getFlopActions(), bbSize);
         convertLogsToBB(result.getTurnActions(), bbSize);
         convertLogsToBB(result.getRiverActions(), bbSize);
+
+        for (Player p : result.getPlayers()) {
+            double bbStack = p.getStack() / bbSize;
+            p.setStackDisplay(String.format("%.1f BB", bbStack));
+        }
     }
 
     private void convertLogsToBB(List<String> logs, double bbSize) {
@@ -223,7 +213,6 @@ public class HandParser {
         if (text == null) return "";
         Pattern p = Pattern.compile("\\$(\\d+(\\.\\d+)?)");
         Matcher m = p.matcher(text);
-
         StringBuilder sb = new StringBuilder();
         while (m.find()) {
             double amount = Double.parseDouble(m.group(1));
@@ -233,6 +222,15 @@ public class HandParser {
         }
         m.appendTail(sb);
         return sb.toString();
+    }
+
+    private double extractBigBlindSize(String line) {
+        try {
+            Pattern p = Pattern.compile("\\/\\$(\\d+(\\.\\d+)?)");
+            Matcher m = p.matcher(line);
+            if (m.find()) return Double.parseDouble(m.group(1));
+        } catch (Exception e) {}
+        return 0.0;
     }
 
     private void calculatePositions(HandResult result) {
